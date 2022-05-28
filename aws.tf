@@ -13,10 +13,13 @@ provider "aws" {
   }
 
 
+data "aws_availability_zones" "available" {}
+
+
+
 
 ##### VPCModule
 module "vpc" {
-  source = "./modules/VPC_Mod"
+  source                = "./modules/VPC_Mod"
 
-  ipblock = "10.0.0.0/16"
 }

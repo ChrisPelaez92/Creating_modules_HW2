@@ -1,8 +1,15 @@
+locals {
+  DateTime = timestamp()
+
+}
+
 ###### VPC
 resource "aws_vpc" "main" {
   cidr_block  = var.ipblock
   tags        = {
-   Name       = "var.vpc_name"
+  Name        = "var.vpc_name"
+  Env         = terraform.workspace
+  Date        = local.DateTime
  }
 }
 
@@ -10,68 +17,53 @@ resource "aws_vpc" "main" {
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.main.id
 
-  tags    = {
-    Name  = "var.vpc_name-Internet_Gateway"
+  tags       = {
+    Name     = "var.vpc_name-Internet_Gateway"
+    Env      = terraform.workspace
+    Date     = local.DateTime
   }
 }
+
+#### Nat Gateway
+resource "aws_nat_gateway" "nat" {
+  allocation_id = aws_eip.eip.id
+  subnet_id     = aws_subnet.public[0].id
+
+  tags = {
+    Name = "gw NAT"
+  }
+
+  # To ensure proper ordering, it is recommended to add an explicit dependency
+  # on the Internet Gateway for the VPC.
+  depends_on = [aws_internet_gateway.gw]
+}
+
 
 ##### Public Subnets
 resource "aws_subnet" "public" {
+  count      = 3
   vpc_id     = aws_vpc.main.id
-  cidr_block = cidrsubnet(var.ipblock, 5, 2)
+  cidr_block = cidrsubnet(var.ipblock, 5, count.index)
 
   tags        = {
-    Name      = "CPFpublic-1a"
+    Name      = "CPFpublic-${count.index}"
+    Env       = terraform.workspace
+    Date      = local.DateTime
   }
 }
 
-#Pub1b
-resource "aws_subnet" "public2" {
-  vpc_id      = aws_vpc.main.id
-  cidr_block  = cidrsubnet(var.ipblock, 5, 3)
-
-  tags        = {
-    Name      = "CPFpublic-1b"
-  }
-}
-
-#Pub1c
-resource "aws_subnet" "public3" {
-  vpc_id      = aws_vpc.main.id
-  cidr_block  = cidrsubnet(var.ipblock, 5, 4)
-
-  tags        = {
-    Name      = "CPFpublic-1c"
-  }
-}
 
 ##### Privet Subnets
-resource "aws_subnet" "privet1" {
+resource "aws_subnet" "privet" {
+  count       = 3
   vpc_id      = aws_vpc.main.id
-  cidr_block  = cidrsubnet(var.ipblock, 5, 5)
+  cidr_block  = cidrsubnet(var.ipblock, 5, count.index + 3 )
 
   tags        = {
-    Name      = "CPFprivet-1a"
-  }
-}
-
-#Priv1b
-resource "aws_subnet" "privet2" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = cidrsubnet(var.ipblock, 5, 6)
-
-  tags       = {
-    Name     = "CPFprivet-1b"
-  }
-}
-
-#Priv1c
-resource "aws_subnet" "Privet3" {
-  vpc_id      = aws_vpc.main.id
-  cidr_block  = cidrsubnet(var.ipblock, 5, 7)
-
-  tags        = {
-    Name      = "CPFprivet-1c"
+    Name      = "CPFprivet-${count.index + 3}"
+    Env       = terraform.workspace
+    Date      = local.DateTime
+    Env       = terraform.workspace
   }
 }
 
@@ -86,36 +78,25 @@ resource "aws_route_table" "public-router" {
 }
     tags = {
       Name = "Public Route Table CPF"
+      Date = local.DateTime
+      Env       = terraform.workspace
     }
  }
 
 
-##### Associate route table
+##### Associate route table########
   resource "aws_route_table_association" "public-router" {
-  subnet_id      = aws_subnet.public.id
+  count          = 3
+  subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public-router.id
 }
 
 ##### Elastic IP
- resource "aws_eip" "eip" {
-   depends_on = [aws_internet_gateway.gw]
-   vpc      = true
- }
+resource "aws_eip" "eip" {
 
-
-##### Nat Gateway
- resource "aws_nat_gateway" "nat" {
- allocation_id = aws_eip.eip.id
-  subnet_id     = aws_subnet.public.id
-
-  tags = {
-    Name = "NAT Gateway CPF"
-  }
-
-  # To ensure proper ordering, it is recommended to add an explicit dependency
-  # on the Internet Gateway for the VPC.
   depends_on = [aws_internet_gateway.gw]
-}
+  vpc        = true
+ }
 
 
 ##### Privet router table
@@ -128,6 +109,8 @@ resource "aws_route_table" "privet-router" {
 }
     tags = {
       Name = "Privet Route Table CPF"
+      Date        = local.DateTime
+      Env       = terraform.workspace
     }
  }
 
@@ -135,6 +118,37 @@ resource "aws_route_table" "privet-router" {
 
  #### Associate Privet route table
    resource "aws_route_table_association" "APR" {
-   subnet_id      = aws_subnet.privet1.id
+   count          = 3
+   subnet_id      = aws_subnet.privet[count.index].id
    route_table_id = aws_route_table.privet-router.id
  }
+
+
+ #### Security Group
+   resource "aws_security_group" "sg" {
+     name        = "SG"
+     description = "Allow TLS inbound traffic"
+     vpc_id      = aws_vpc.main.id
+
+     ingress {
+       description      = "TLS from VPC"
+       from_port        = 443
+       to_port          = 443
+       protocol         = "tcp"
+       cidr_blocks      = [aws_vpc.main.cidr_block]
+       ipv6_cidr_blocks = ["::/0"]
+     }
+
+     egress {
+       from_port        = 0
+       to_port          = 0
+       protocol         = "-1"
+       cidr_blocks      = ["0.0.0.0/0"]
+       ipv6_cidr_blocks = ["::/0"]
+     }
+  tags = {
+       Name = "allow_tls"
+       Date = local.DateTime
+       Env  = terraform.workspace
+       }
+     }
